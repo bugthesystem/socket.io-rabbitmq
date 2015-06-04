@@ -17,8 +17,8 @@ required the following:
 
 ```js
 var io = require('socket.io')(3000);
-var zmq = require('socket.io-rabbitmq');
-io.adapter(zmq({
+var rabbitmq = require('socket.io-rabbitmq');
+io.adapter(rabbitmq({
   host: '127.0.0.1',
   port: 5672
 }));
