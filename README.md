@@ -8,11 +8,6 @@ socket.io adapter  [rabbitmq](https://www.rabbitmq.com/) implementation.
 $ npm install socket.io-rabbitmq
 ```
 
-required the following:
-
-- [socket.io-rabbitmq-server](https://github.com/ziyasal/socket.io-rabbitmq-server)
-
-
 # Usage
 
 ```js
