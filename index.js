@@ -25,7 +25,7 @@ function adapter(opts) {
     var sub = opts.subClient;
     var prefix = opts.key || 'socket.io-rabbitmq';
 
-    this.url = format('amqp://%s:%s', opts.host, opts.port);
+    this.url = opts.url ? opts.url : format('amqp://%s:%s', this.host, this.port);
 
     if (!pub) {
         _connect(this.url, function cb(err, ch) {
@@ -54,31 +54,33 @@ function adapter(opts) {
         Adapter.call(this, nsp);
 
         var self = this;
-        sub.consume(key, this.onMessage.bind(this));
+        sub.consume(key, this.onMessage.bind(this), {noAck: true});
     }
 
     RabbitMQ.prototype.__proto__ = Adapter.prototype;
 
     RabbitMQ.prototype.onMessage = function (msg) {
-        msg = msg.content;
+        if (msg !== null) {
+            msg = msg.content;
 
-        var offset = channelOffset(msg);
-        var channel = msg.slice(0, offset);
-        debug('RabbitMQ#onMessage: channel = %s', channel.toString());
+            var offset = channelOffset(msg);
+            var channel = msg.slice(0, offset);
+            debug('RabbitMQ#onMessage: channel = %s', channel.toString());
 
 
-        var payload = msgpack.decode(msg.slice(offset + 1, msg.length));
-        debug('RabbitMQ#onMessage: payload = %j', payload);
-        if (payload[0] && payload[0].nsp === undefined) {
-            payload[0].nsp = '/';
+            var payload = msgpack.decode(msg.slice(offset + 1, msg.length));
+            debug('RabbitMQ#onMessage: payload = %j', payload);
+            if (payload[0] && payload[0].nsp === undefined) {
+                payload[0].nsp = '/';
+            }
+
+            if (!payload[0] || payload[0].nsp != this.nsp.name) {
+                return debug('RabbitMQ#onMessage: ignore different namespace');
+            }
+
+            payload.push(true);
+            this.broadcast.apply(this, payload);
         }
-
-        if (!payload[0] || payload[0].nsp != this.nsp.name) {
-            return debug('RabbitMQ#onMessage: ignore different namespace');
-        }
-
-        payload.push(true);
-        this.broadcast.apply(this, payload);
     };
 
     RabbitMQ.prototype.broadcast = function (packet, opts, remote) {
