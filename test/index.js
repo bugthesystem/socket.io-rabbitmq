@@ -12,16 +12,13 @@ var amqp = require('amqplib/callback_api');
 var Adapter = require('../');
 
 
-function client(srv, ns, opts) {
+function client(port, ns, opts) {
     if (typeof ns === 'object') {
         opts = ns;
         ns = null;
     }
-    var addr = srv.address();
-    if (!addr) {
-        addr = srv.listen().address();
-    }
-    var url = format('ws://%s:%s%s', addr.address, addr.port, (ns || ''));
+
+    var url = format('http://localhost:%s%s', port, (ns || ''));
     return ioc(url, opts);
 }
 
@@ -48,6 +45,12 @@ function _connect(url, cb) {
  */
 
 describe('socket.io-rabbitmq', function () {
+    if (!Array.prototype.remove) {
+        Array.prototype.remove = function (value) {
+            this.splice(this.indexOf(value), 1);
+            return true;
+        };
+    }
     describe('broadcast', function () {
 
         var url = process.env.RABBITMQ_URL ? process.env.RABBITMQ_URL : "amqp://192.168.59.103:5672";
@@ -57,8 +60,9 @@ describe('socket.io-rabbitmq', function () {
 
         beforeEach(function (done) {
             var self = this;
+            var PORT_ARRAY = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-            async.times(2, function (n, next) {
+            async.times(1, function (n, next) {
                 var pub, sub;
 
 
@@ -86,11 +90,14 @@ describe('socket.io-rabbitmq', function () {
                         var sio = io(srv, {
                             adapter: Adapter({
                                 pubClient: pub,
-                                subClient: sub
+                                subClient: sub,
+                                url: url
                             })
                         });
 
-                        srv.listen(function () {
+                        var PORT = PORT_ARRAY[Math.floor(Math.random() * PORT_ARRAY.length)];
+                        PORT_ARRAY.remove(PORT);
+                        srv.listen(PORT, function () {
                             ['/', '/nsp'].forEach(function (name) {
                                 sio.of(name).on('connection', function (socket) {
                                     socket.on('join', function (fn) {
@@ -109,8 +116,8 @@ describe('socket.io-rabbitmq', function () {
 
                             async.parallel([
                                 function (fn) {
-                                    async.times(2, function (n, next) {
-                                        var socket = client(srv, '/nsp', {forceNew: true});
+                                    async.times(1, function (n, next) {
+                                        var socket = client(PORT, '/nsp', {forceNew: true});
                                         socket.on('connect', function () {
                                             socket.emit('join', function () {
                                                 next(null, socket);
@@ -119,7 +126,7 @@ describe('socket.io-rabbitmq', function () {
                                     }, fn);
                                 },
                                 function (fn) {
-                                    var socket = client(srv, '/nsp', {forceNew: true});
+                                    var socket = client(PORT, '/nsp', {forceNew: true});
                                     socket.on('connect', function () {
                                         socket.on('broadcast', function () {
                                             throw new Error('Called unexpectedly: different room');
@@ -128,7 +135,7 @@ describe('socket.io-rabbitmq', function () {
                                     });
                                 },
                                 function (fn) {
-                                    var socket = client(srv, {forceNew: true});
+                                    var socket = client(PORT, {forceNew: true});
                                     socket.on('connect', function () {
                                         socket.on('broadcast', function () {
                                             throw new Error('Called unexpectedly: different room');
