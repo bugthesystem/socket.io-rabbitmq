@@ -8,7 +8,7 @@ var http = require('http').Server;
 var io = require('socket.io');
 var ioc = require('socket.io-client');
 var async = require('async');
-var amqp = require('amqplib/callback_api');
+var amqp = require('amqplib');
 var Adapter = require('../');
 
 
@@ -21,22 +21,23 @@ function client(port, ns, opts) {
     var url = format('http://localhost:%s%s', port, (ns || ''));
     return ioc(url, opts);
 }
+var rabbitConn;
+
 
 function _connect(url, cb) {
-    amqp.connect(url, function (err, conn) {
-        if (err) {
-            return console.error("[AMQP]", err.message);
-        }
 
-        conn.createChannel(function on_open(err, ch) {
-            if (err != null) {
-                console.error("[AMQP] create channel error", err.message);
-                return cb(err);
-            }
+    amqp.connect(url)
+        .then(function (conn) {
+            rabbitConn = conn;
 
-            cb(null, ch);
+            // Create the rabbit channel
+            return rabbitConn.createChannel();
+        }).then(function (ch) {
+            return cb(null, ch);
+        }).catch(function (err) {
+            console.error("[AMQP] create channel error", err.message);
+            return cb(err);
         });
-    });
 }
 
 

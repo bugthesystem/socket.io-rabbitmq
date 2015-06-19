@@ -5,9 +5,8 @@
 var debug = require('debug')('socket.io-zeromq');
 var Adapter = require('socket.io-adapter');
 var format = require('util').format;
-var amqp = require('amqplib/callback_api');
+var amqp = require('amqplib');
 var msgpack = require('msgpack-js');
-var uid2 = require('uid2');
 
 
 /**
@@ -16,6 +15,11 @@ var uid2 = require('uid2');
 
 module.exports = adapter;
 
+function errorHandler(err) {
+    return console.error("[AMQP]", err.message);
+    //TODO: process.exit(1) //??
+}
+
 function adapter(opts) {
     opts = opts || {};
     opts.host = opts.host || '127.0.0.1';
@@ -23,28 +27,61 @@ function adapter(opts) {
 
     var pub = opts.pubClient;
     var sub = opts.subClient;
-    var prefix = opts.key || 'socket.io-rabbitmq';
+    var prefix = opts.key || 'socketiorabbitmq';
+    var exchange = 'socketiorabbitmq';
+    var rabbitConn;
+    var queue;
 
     this.url = opts.url ? opts.url : format('amqp://%s:%s', this.host, this.port);
 
     if (!pub) {
-        _connect(this.url, function cb(err, ch) {
-            if (err) return console.error("[AMQP]", err.message);
-
-            pub = ch;
-        });
+        // Create the rabbit connection
+        amqp.connect(this.url)
+            .then(function (conn) {
+                rabbitConn = conn;
+                // Create the rabbit channel
+                return rabbitConn.createChannel();
+            }).then(function (ch) {
+                pub = ch;
+                // Create the exchange (or do nothing if it exists)
+                return pub.assertExchange(exchange, 'topic', {durable: false});
+            }).catch(errorHandler);
+    } else {
+        pub.assertExchange(exchange, 'topic', {durable: false});
     }
 
     if (!sub) {
-        _connect(this.url, function cb(err, ch) {
-            if (err) return console.error("[AMQP]", err.message);
 
-            sub = ch;
-        });
+        // Create the rabbit connection
+        amqp.connect(url)
+            .then(function (conn) {
+                rabbitConn = conn;
+
+                // Create the rabbit channel
+                return rabbitConn.createChannel();
+            }).then(function (ch) {
+                sub = ch;
+
+                // Create the exchange (or do nothing if it exists)
+                return sub.assertExchange(exchange, 'topic', {durable: false});
+            }).then(function () {
+                // Create the queue
+                return sub.assertQueue('', {exclusive: true});
+            }).then(function (q) {
+                queue = q.queue;
+                // Bind the queue to all topics about given key.
+                return sub.bindQueue(queue, exchange, format('%s.*', prefix));
+            }).catch(errorHandler);
+    } else {
+        sub.assertQueue('', {exclusive: true})
+            .then(function (q) {
+                queue = q.queue;
+                // Bind the queue to all topics about given key.
+                return sub.bindQueue(queue, exchange, format('%s.*', prefix));
+            }).catch(errorHandler);
     }
 
-    var key = prefix + '#emitter';
-
+    var key = prefix + '.emitter';
 
     /*
      * define RabbitMQ Adapter
@@ -53,8 +90,7 @@ function adapter(opts) {
     function RabbitMQ(nsp) {
         Adapter.call(this, nsp);
 
-        var self = this;
-        sub.consume(key, this.onMessage.bind(this), {noAck: true});
+        sub.consume(queue, this.onMessage.bind(this));
     }
 
     RabbitMQ.prototype.__proto__ = Adapter.prototype;
@@ -92,10 +128,12 @@ function adapter(opts) {
             debug('RabbitMQ#broadcast: send data length -> channel = %d, payload = %d, data = %d', channel.length, payload.length, data.length);
 
             //TODO: Examine how redis adapter works
-            pub.publish("", key, data);
+            pub.publish(exchange, key, data);
         }
     };
 
+    RabbitMQ.pubClient = pub;
+    RabbitMQ.subClient = sub;
     return RabbitMQ;
 }
 
@@ -108,30 +146,4 @@ function channelOffset(msg) {
         }
     }
     return offset;
-}
-
-
-function _connect(url, cb) {
-    amqp.connect(url, function (err, conn) {
-        if (err) {
-            return console.error("[AMQP]", err.message);
-        }
-        conn.on("error", function (err) {
-            if (err.message !== "Connection closing") {
-                console.error("[AMQP] conn error", err.message);
-            }
-        });
-        conn.on("close", function () {
-            return console.error("[AMQP] reconnecting");
-        });
-
-        conn.createChannel(function on_open(err, ch) {
-            if (err != null) {
-                console.error("[AMQP] create channel error", err.message);
-                return cb(err);
-            }
-
-            cb(null, ch);
-        });
-    });
 }

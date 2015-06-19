@@ -7,8 +7,9 @@ var http = require('http').Server;
 var io = require('socket.io');
 var ioc = require('socket.io-client');
 var async = require('async');
-var amqp = require('amqplib/callback_api');
+var amqp = require('amqplib');
 var Adapter = require('../');
+
 
 function client(url, ns, opts) {
     if (typeof ns === 'object') {
@@ -19,21 +20,21 @@ function client(url, ns, opts) {
     return ioc(url, opts);
 }
 
+var rabbitConn;
+
 function _connect(url, cb) {
-    amqp.connect(url, function (err, conn) {
-        if (err) {
-            return console.error("[AMQP]", err.message);
-        }
+    amqp.connect(url)
+        .then(function (conn) {
+            rabbitConn = conn;
 
-        conn.createChannel(function on_open(err, ch) {
-            if (err != null) {
-                console.error("[AMQP] create channel error", err.message);
-                return cb(err);
-            }
-
-            cb(null, ch);
+            // Create the rabbit channel
+            return rabbitConn.createChannel();
+        }).then(function (ch) {
+            return cb(null, ch);
+        }).catch(function (err) {
+            console.error("[AMQP] create channel error", err.message);
+            return cb(err);
         });
-    });
 }
 
 
@@ -41,7 +42,7 @@ function _connect(url, cb) {
  * test(s)
  */
 
-describe('socket.io-rabbitmq', function () {
+describe('test.custom => socket.io-rabbitmq', function () {
     describe('broadcast', function () {
 
         var url = process.env.RABBITMQ_URL ? process.env.RABBITMQ_URL : "amqp://192.168.59.103:5672";
